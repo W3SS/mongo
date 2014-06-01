@@ -1,29 +1,13 @@
 package mongo
 
-import "github.com/go4r/handy"
+import (
+	"github.com/go4r/handy"
+)
 
 //Mgo Hooks
 
 type MongoNamedType interface {
 	CollectionName() string
-}
-
-type MongoResult struct {
-	executors []func() error
-}
-
-func (result *MongoResult) Fetch() (int, error) {
-	for k, v := range result.executors {
-		var err = v()
-		if err != nil {
-			return k, err
-		}
-	}
-	return len(result.executors), nil
-}
-
-type MongoQuery struct {
-	Query interface{}
 }
 
 //type MongoPrimaryKey interface {
@@ -36,7 +20,8 @@ type MongoQuery struct {
 //
 
 type MongoLoader interface {
-	Load(*handy.Context) interface{}
+MongoNamedType
+	AutoLoad(*handy.Context) interface{}
 }
 
 type MongoBeforeDelete interface {

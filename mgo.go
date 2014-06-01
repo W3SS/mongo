@@ -1,8 +1,9 @@
 package mongo
 
 import (
+	."github.com/go4r/handy"
+
 	"errors"
-	"github.com/go4r/handy"
 	"labix.org/v2/mgo"
 	"reflect"
 	"labix.org/v2/mgo/bson"
@@ -14,13 +15,13 @@ var (
 	MongoDBName   = "test"
 	MongoUser     = ""
 	MongoPass     = ""
-	MongoSession  *mgo.Session
-	MongoDB       *mgo.Database
+	MongoSession        *mgo.Session
+	MongoDatabase       *mgo.Database
 )
 
 func init() {
-	handy.Server.Context.SetProviderMap(handy.ContextProviderMap{
-		"mongo.session": func(c *handy.Context) func() interface{} {
+	HandyServer.Context().MapProviders(ProvidersMap{
+		"mongo.session": func(c *Context) func() interface{} {
 
 			var err error
 			if MongoSession == nil {
@@ -40,33 +41,33 @@ func init() {
 				return sessCopy
 			}
 		},
-		"mongo.db": func(c *handy.Context) func() interface{} {
+		"mongo.db": func(c *Context) func() interface{} {
 			session := c.Get("mongo.session").(*mgo.Session)
-			if MongoDB == nil {
-				MongoDB = session.DB(MongoDBName)
+			if MongoDatabase == nil {
+				MongoDatabase = session.DB(MongoDBName)
 
 				if MongoNeedAuth == true {
-					MongoDB.Login(MongoUser, MongoPass)
+					MongoDatabase.Login(MongoUser, MongoPass)
 				}
 
 			}
 			return func() interface{} {
-				return MongoDB
+				return MongoDatabase
 			}
 		},
 	})
 }
 
-func MongoDb(r interface{}, name string) *mgo.Database {
-	return handy.CContext(r).Get("mongo.session").(*mgo.Session).DB(name)
+func MongoDB(r interface{}, name string) *mgo.Database {
+	return CContext(r).Get("mongo.session").(*mgo.Session).DB(name)
 }
 
 func Collection(r interface{}, name string) *mgo.Collection {
-	return handy.CContext(r).Get("mongo.db").(*mgo.Database).C(name)
+	return CContext(r).Get("mongo.db").(*mgo.Database).C(name)
 }
 
-func _collection(r interface{}, name string) (*mgo.Collection, *handy.Context) {
-	c := handy.CContext(r)
+func _collection(r interface{}, name string) (*mgo.Collection, *Context) {
+	c := CContext(r)
 	return c.Get("mongo.db").(*mgo.Database).C(name), c
 }
 
@@ -76,7 +77,7 @@ func MongoInsert(r interface{}, nameOrElement interface{}, add ...interface{}) e
 
 	var (
 		collection *mgo.Collection
-		c *handy.Context
+		c *Context
 	)
 
 	add = append([]interface{}{nameOrElement}, add...)
@@ -130,7 +131,7 @@ func MongoInsert(r interface{}, nameOrElement interface{}, add ...interface{}) e
 }
 
 func MongoChangeInfo(r interface{}) (*mgo.ChangeInfo) {
-	return handy.CContext(r).Get("mongo.changeinfo").(*mgo.ChangeInfo)
+	return CContext(r).Get("mongo.changeinfo").(*mgo.ChangeInfo)
 }
 
 func MongoLastId(r interface{}) interface{} {
@@ -148,7 +149,7 @@ func MongoUpdate(r interface{}, nameOrElement interface{}, add ...interface{}) e
 	var (
 		collection *mgo.Collection
 		findEr interface{}
-		c *handy.Context
+		c *Context
 	)
 
 	add = append([]interface{}{nameOrElement}, add...)
@@ -160,18 +161,10 @@ func MongoUpdate(r interface{}, nameOrElement interface{}, add ...interface{}) e
 			collection, c = _collection(r, v)
 			continue
 		case MongoLoader:
-			if v, ok := v.(MongoNamedType); ok {
-				collection, c = _collection(r, v.CollectionName())
-			}
-			findEr = v.Load(c)
+			collection, c = _collection(r, v.CollectionName())
+			findEr = v.AutoLoad(c)
 		case MongoNamedType:
 			collection, c = _collection(r, v.CollectionName())
-		case MongoQuery:
-			findEr = v.Query
-			continue
-		case *MongoQuery:
-			findEr = v.Query
-			continue
 		}
 
 		if collection == nil {
@@ -222,7 +215,7 @@ func MongoSave(r interface{}, nameOrElement interface{}, add ...interface{}) err
 	var (
 		collection *mgo.Collection
 		findEr interface{}
-		c *handy.Context
+		c *Context
 	)
 
 	add = append([]interface{}{nameOrElement}, add...)
@@ -234,18 +227,10 @@ func MongoSave(r interface{}, nameOrElement interface{}, add ...interface{}) err
 			collection, c = _collection(r, v)
 			continue
 		case MongoLoader:
-			if v, ok := v.(MongoNamedType); ok {
-				collection, c = _collection(r, v.CollectionName())
-			}
-			findEr = v.Load(c)
+			collection, c = _collection(r, v.CollectionName())
+			findEr = v.AutoLoad(c)
 		case MongoNamedType:
 			collection, c = _collection(r, v.CollectionName())
-		case MongoQuery:
-			findEr = v.Query
-			continue
-		case *MongoQuery:
-			findEr = v.Query
-			continue
 		}
 
 		if collection == nil {
@@ -296,7 +281,7 @@ func MongoSave(r interface{}, nameOrElement interface{}, add ...interface{}) err
 func MongoDelete(r interface{}, nameOrElement interface{}, add ...interface{}) error {
 
 	var (
-		c *handy.Context
+		c *Context
 		collection *mgo.Collection
 		findEr interface{}
 	)
@@ -309,14 +294,9 @@ func MongoDelete(r interface{}, nameOrElement interface{}, add ...interface{}) e
 		case string:
 			collection, c = _collection(r, v)
 			continue
-
 		case MongoNamedType:
 			collection, c = _collection(r, v.CollectionName())
 			findEr = v
-		case MongoQuery:
-			findEr = v.Query
-		case *MongoQuery:
-			findEr = v.Query
 		}
 
 		if collection == nil {
@@ -349,69 +329,42 @@ func MongoDelete(r interface{}, nameOrElement interface{}, add ...interface{}) e
 	return nil
 }
 
-
-func MongoFind(r interface{}, nameOrElement interface{}, add ...interface{}) *MongoResult {
-
-	var (
-		c *handy.Context
-		collection *mgo.Collection
-		findEr interface{}
-		resultSet MongoResult
-	)
-
-	add = append([]interface{}{nameOrElement}, add...)
-
-	for _, v := range add {
-
-		switch v := v.(type){
-		case string:
-			collection, c = _collection(r, v)
-			continue
-		case MongoLoader:
-			if v, ok := v.(MongoNamedType); ok {
-				collection, c = _collection(r, v.CollectionName())
-			}
-			findEr = v.Load(c)
-		case MongoNamedType:
-			collection, c = _collection(r, v.CollectionName())
-		case MongoQuery:
-			findEr = v.Query
-			continue
-		case *MongoQuery:
-			findEr = v.Query
-			continue
-		}
-
-
-		if collection == nil {
-			panic(errors.New("No Collection Especified"))
-		}
-
-		value := reflect.ValueOf(v)
-		if value.Kind() != reflect.Ptr {
-			panic(errors.New("Invalid target element, is not a pointer"))
-		}
-		if value.Elem().Kind() == reflect.Slice || value.Elem().Kind() == reflect.Array {
-			resultSet.executors = append(resultSet.executors, func() error {
-				return executeQueryAll(collection, c, findEr, value)
-			})
-		}else {
-			resultSet.executors = append(resultSet.executors, func() error {
-				return executeQueryOne(collection, c, findEr, v)
-			})
-		}
-
-	}
-
-	return &resultSet
+type mongoQuery struct {
+	*mgo.Query
+	context *Context
 }
 
-func executeQueryAll(collection *mgo.Collection, c *handy.Context, findEr interface{}, resultv reflect.Value) error {
-	iter := collection.Find(findEr).Iter()
+func (mQuery *mongoQuery) One(v interface{}) error {
+
+	if v, ok := v.(MongoBeforeFetch); ok {
+		err := v.BeforeFetch(mQuery.context)
+		if err != nil {
+			return err
+		}
+	}
+
+	err := mQuery.One(v)
+	if err != nil {
+		return err
+	}
+
+	if v, ok := v.(MongoAfterFetch); ok {
+		v.AfterFetch(mQuery.context)
+	}
+
+	return nil
+}
+
+
+func (mQuery *mongoQuery) All(target interface{}) error {
+	iter := mQuery.Iter()
+
+	resultv := reflect.ValueOf(target)
 
 	if resultv.Kind() != reflect.Ptr || resultv.Elem().Kind() != reflect.Slice {
 		panic("result argument must be a slice address")
 	}
+
 	slicev := resultv.Elem()
 	slicev = slicev.Slice(0, slicev.Cap())
 	elemt := slicev.Type().Elem()
@@ -420,24 +373,26 @@ func executeQueryAll(collection *mgo.Collection, c *handy.Context, findEr interf
 		if slicev.Len() == i {
 			elemp := reflect.New(elemt)
 			newElement := elemp.Interface()
+
 			if newElement, ok := newElement.(MongoBeforeFetch); ok {
-				err := newElement.BeforeFetch(c)
+				err := newElement.BeforeFetch(mQuery.context)
 				if err != nil {
 					return err
 				}
 			}
+
 			if !iter.Next(newElement) {
 				break
 			}
 			if newElement, ok := newElement.(MongoAfterFetch); ok {
-				newElement.AfterFetch(c)
+				newElement.AfterFetch(mQuery.context)
 			}
 			slicev = reflect.Append(slicev, elemp.Elem())
 			slicev = slicev.Slice(0, slicev.Cap())
 		} else {
 			element := slicev.Index(i).Addr().Interface()
 			if element, ok := element.(MongoBeforeFetch); ok {
-				err := element.BeforeFetch(c)
+				err := element.BeforeFetch(mQuery.context)
 				if err != nil {
 					return err
 				}
@@ -446,7 +401,7 @@ func executeQueryAll(collection *mgo.Collection, c *handy.Context, findEr interf
 				break
 			}
 			if element, ok := element.(MongoAfterFetch); ok {
-				element.AfterFetch(c)
+				element.AfterFetch(mQuery.context)
 			}
 		}
 		i++
@@ -455,27 +410,14 @@ func executeQueryAll(collection *mgo.Collection, c *handy.Context, findEr interf
 	return iter.Close()
 }
 
-func executeQueryOne(collection *mgo.Collection, c *handy.Context, findEr interface{}, v interface{}) error {
-
-	if v, ok := v.(MongoBeforeFetch); ok {
-		err := v.BeforeFetch(c)
-		if err != nil {
-			return err
-		}
-	}
-
-	err := collection.Find(findEr).One(v)
-	if err != nil {
-		return err
-	}
-
-	if v, ok := v.(MongoAfterFetch); ok {
-		v.AfterFetch(c)
-	}
-
-	return nil
+func MongoFind(r interface{}, collectionName string, query interface{}) *mongoQuery {
+	var collection, c = _collection(r, collectionName)
+	return &mongoQuery{collection.Find(query), c}
 }
 
+func MongoLoad(r interface{}, autoloader MongoLoader) error {
+	return MongoFind(r, autoloader.CollectionName(), autoloader.AutoLoad(CContext(r))).One(autoloader)
+}
 
 func MongoCount(r interface{}, name string, find interface{}) int {
 	value, err := Collection(r, name).Find(find).Count()
